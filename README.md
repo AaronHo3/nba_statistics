@@ -50,6 +50,12 @@ Recommended file types are per-season player stats tables (for example files wit
 streamlit run app.py
 ```
 
+## Visual Theme
+
+- Streamlit base theme is defined in `.streamlit/config.toml`.
+- Additional NBA-specific styling (custom Plotly template + CSS) is initialized in `setup_nba_theme()` inside `app.py`.
+- To make another sport dashboard feel different, use a different config palette and a separate style/template function.
+
 ## Useful Make commands
 
 ```bash

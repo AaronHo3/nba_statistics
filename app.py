@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -22,6 +23,82 @@ except Exception:
     HAS_XGBOOST = False
 
 st.set_page_config(page_title="NBA Historical Dashboards", layout="wide")
+
+
+def setup_nba_theme() -> None:
+    pio.templates["nba_custom"] = go.layout.Template()
+    pio.templates["nba_custom"].layout = go.Layout(
+        font=dict(family="Avenir Next, Helvetica Neue, Arial, sans-serif", color="#F8E9B8"),
+        paper_bgcolor="#1A0E2A",
+        plot_bgcolor="#1A0E2A",
+        colorway=["#FDB927", "#B38AE8", "#7A4CB3", "#FFDE7D", "#5F2B96", "#E8C76D"],
+        title=dict(font=dict(size=22, color="#FDB927")),
+        xaxis=dict(gridcolor="rgba(253, 185, 39, 0.18)", zerolinecolor="rgba(253, 185, 39, 0.38)"),
+        yaxis=dict(gridcolor="rgba(253, 185, 39, 0.18)", zerolinecolor="rgba(253, 185, 39, 0.38)"),
+    )
+    pio.templates.default = "nba_custom"
+
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700;800&display=swap');
+
+        html, body, [class*="css"]  {
+            font-family: 'Barlow', 'Helvetica Neue', Arial, sans-serif;
+        }
+        .stApp {
+            background:
+              radial-gradient(circle at 8% 14%, rgba(253,185,39,0.22), transparent 34%),
+              radial-gradient(circle at 90% 8%, rgba(123,75,176,0.38), transparent 30%),
+              radial-gradient(circle at 75% 85%, rgba(95,43,150,0.26), transparent 30%),
+              linear-gradient(170deg, #160A24 0%, #2A1146 45%, #3A155A 70%, #1B0D2D 100%);
+        }
+        [data-testid="stAppViewContainer"] {
+            color: #F8E9B8;
+        }
+        h1, h2, h3, h4, h5, h6 {
+            color: #FDB927 !important;
+            letter-spacing: 0.2px;
+        }
+        p, label, span, div {
+            color: #F3EAD1;
+        }
+        div[data-testid="stMetric"] {
+            border: 1px solid rgba(253,185,39,0.25);
+            border-radius: 14px;
+            padding: 10px 14px;
+            background: linear-gradient(180deg, rgba(60,26,94,0.88) 0%, rgba(34,14,56,0.95) 100%);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+        }
+        div[data-testid="stTabs"] button[role="tab"] {
+            border-radius: 999px;
+            border: 1px solid rgba(253,185,39,0.35);
+            padding: 8px 14px;
+            background: rgba(43,18,69,0.9);
+            color: #F8E9B8;
+            font-weight: 700;
+        }
+        div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+            background: linear-gradient(135deg, #5F2B96 0%, #7B4BB0 48%, #FDB927 100%);
+            color: #1B1026;
+            border-color: transparent;
+        }
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, rgba(24,10,39,0.95) 0%, rgba(44,18,70,0.95) 100%);
+            border-right: 1px solid rgba(253,185,39,0.25);
+        }
+        [data-testid="stDataFrame"] {
+            border: 1px solid rgba(253,185,39,0.18);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+setup_nba_theme()
 
 DATA_DIR = Path("data/raw")
 
@@ -392,10 +469,10 @@ def render_player_tab() -> None:
             x=career_clean["season"],
             y=career_clean[trajectory_metric],
             mode="lines+markers",
-            line=dict(color="#1264A3", width=3),
-            marker=dict(size=7, color="#0B1F3A"),
+            line=dict(color="#FDB927", width=3),
+            marker=dict(size=7, color="#B38AE8"),
             fill="tozeroy",
-            fillcolor="rgba(18, 100, 163, 0.12)",
+            fillcolor="rgba(253, 185, 39, 0.18)",
             hovertemplate="Season %{x}<br>" + trajectory_metric.title() + ": %{y:.2f}<extra></extra>",
         )
     )
@@ -462,15 +539,15 @@ def render_player_tab() -> None:
             radar = go.Figure()
             radar.add_trace(
                 go.Scatterpolar(
-                    r=percentiles + [percentiles[0]],
-                    theta=metric_labels + [metric_labels[0]],
-                    fill="toself",
-                    fillcolor="rgba(11, 31, 58, 0.25)",
-                    line=dict(color="#0B1F3A", width=3),
-                    marker=dict(color="#1264A3", size=7),
-                    name=f"{selected_player} ({radar_season})",
-                    hovertemplate="%{theta}: %{r:.1f} percentile<extra></extra>",
-                )
+                r=percentiles + [percentiles[0]],
+                theta=metric_labels + [metric_labels[0]],
+                fill="toself",
+                fillcolor="rgba(253, 185, 39, 0.20)",
+                line=dict(color="#FDB927", width=3),
+                marker=dict(color="#B38AE8", size=7),
+                name=f"{selected_player} ({radar_season})",
+                hovertemplate="%{theta}: %{r:.1f} percentile<extra></extra>",
+            )
             )
             radar.update_layout(
                 template="plotly_white",
@@ -557,7 +634,12 @@ def render_team_tab() -> None:
             marker=dict(
                 size=10,
                 color=filtered["win_pct"],
-                colorscale="Viridis",
+                colorscale=[
+                    [0.0, "#2A1146"],
+                    [0.35, "#5F2B96"],
+                    [0.65, "#B38AE8"],
+                    [1.0, "#FDB927"],
+                ],
                 colorbar=dict(title="Win%"),
                 line=dict(color="rgba(255,255,255,0.4)", width=0.8),
             ),
@@ -601,7 +683,7 @@ def render_team_tab() -> None:
                 x=league_avg["season"],
                 y=league_avg["win_pct"],
                 mode="lines",
-                line=dict(color="rgba(80,80,80,0.5)", width=2, dash="dash"),
+                line=dict(color="rgba(248,233,184,0.55)", width=2, dash="dash"),
                 name="League Avg",
             )
         )
@@ -610,10 +692,10 @@ def render_team_tab() -> None:
                 x=history["season"],
                 y=history["win_pct"],
                 mode="lines+markers",
-                line=dict(color="#0B1F3A", width=3),
-                marker=dict(size=7, color="#1264A3"),
+                line=dict(color="#FDB927", width=3),
+                marker=dict(size=7, color="#B38AE8"),
                 fill="tozeroy",
-                fillcolor="rgba(18, 100, 163, 0.12)",
+                fillcolor="rgba(253, 185, 39, 0.16)",
                 name=selected_team,
             )
         )
@@ -642,9 +724,9 @@ def render_team_tab() -> None:
         bar_df = bar_df.sort_values("pts", ascending=False).head(15)
 
         stacked = go.Figure()
-        stacked.add_bar(x=bar_df["team"], y=bar_df["pts_2p"], name="2PT Points", marker_color="#1f77b4")
-        stacked.add_bar(x=bar_df["team"], y=bar_df["pts_3p"], name="3PT Points", marker_color="#17becf")
-        stacked.add_bar(x=bar_df["team"], y=bar_df["pts_ft"], name="FT Points", marker_color="#ff7f0e")
+        stacked.add_bar(x=bar_df["team"], y=bar_df["pts_2p"], name="2PT Points", marker_color="#5F2B96")
+        stacked.add_bar(x=bar_df["team"], y=bar_df["pts_3p"], name="3PT Points", marker_color="#B38AE8")
+        stacked.add_bar(x=bar_df["team"], y=bar_df["pts_ft"], name="FT Points", marker_color="#FDB927")
         stacked.update_layout(
             barmode="stack",
             height=420,
@@ -666,7 +748,13 @@ def render_team_tab() -> None:
             z=heat_df.values,
             x=heat_df.columns,
             y=heat_df.index,
-            colorscale="YlGnBu",
+            colorscale=[
+                [0.0, "#1A0E2A"],
+                [0.25, "#3C1A5E"],
+                [0.5, "#5F2B96"],
+                [0.75, "#8E63C9"],
+                [1.0, "#FDB927"],
+            ],
             colorbar=dict(title="Off Rtg"),
             hovertemplate="Team: %{y}<br>Season: %{x}<br>Off Rtg: %{z:.2f}<extra></extra>",
         )
@@ -764,9 +852,9 @@ def render_era_tab() -> None:
     with row1:
         st.markdown("### Scoring Distribution")
         stacked = go.Figure()
-        stacked.add_bar(x=scoring["era"], y=scoring["share_2p"], name="2PT Share", marker_color="#1f77b4")
-        stacked.add_bar(x=scoring["era"], y=scoring["share_3p"], name="3PT Share", marker_color="#17becf")
-        stacked.add_bar(x=scoring["era"], y=scoring["share_ft"], name="FT Share", marker_color="#ff7f0e")
+        stacked.add_bar(x=scoring["era"], y=scoring["share_2p"], name="2PT Share", marker_color="#5F2B96")
+        stacked.add_bar(x=scoring["era"], y=scoring["share_3p"], name="3PT Share", marker_color="#B38AE8")
+        stacked.add_bar(x=scoring["era"], y=scoring["share_ft"], name="FT Share", marker_color="#FDB927")
         stacked.update_layout(
             barmode="stack",
             template="plotly_white",
@@ -784,7 +872,7 @@ def render_era_tab() -> None:
                 go.Bar(
                     x=assist["era"],
                     y=assist["ast_rate"],
-                    marker_color="#0B1F3A",
+                    marker_color="#B38AE8",
                     hovertemplate="Era: %{x}<br>Assist Rate: %{y:.3f}<extra></extra>",
                 )
             ]
@@ -804,7 +892,7 @@ def render_era_tab() -> None:
                 go.Bar(
                     x=threes["era"],
                     y=threes["x3pa_per_game"],
-                    marker_color="#1264A3",
+                    marker_color="#FDB927",
                     hovertemplate="Era: %{x}<br>3PA/G: %{y:.2f}<extra></extra>",
                 )
             ]
@@ -824,7 +912,7 @@ def render_era_tab() -> None:
                 go.Bar(
                     x=pace["era"],
                     y=pace["pace"],
-                    marker_color="#005B96",
+                    marker_color="#7A4CB3",
                     hovertemplate="Era: %{x}<br>Pace: %{y:.2f}<extra></extra>",
                 )
             ]
@@ -1012,7 +1100,7 @@ def render_similar_players_tab() -> None:
                     x=[x0, x1],
                     y=[y0, y1],
                     mode="lines",
-                    line=dict(color="rgba(18,100,163,0.45)", width=1 + 5 * w),
+                    line=dict(color="rgba(253,185,39,0.45)", width=1 + 5 * w),
                     hoverinfo="skip",
                     showlegend=False,
                 )
@@ -1031,14 +1119,14 @@ def render_similar_players_tab() -> None:
                             x=[x0, x1],
                             y=[y0, y1],
                             mode="lines",
-                            line=dict(color="rgba(11,31,58,0.2)", width=1 + 3 * w),
+                            line=dict(color="rgba(179,138,232,0.30)", width=1 + 3 * w),
                             hoverinfo="skip",
                             showlegend=False,
                         )
                     )
 
         node_sizes = [28 if p == selected_player else 14 + 10 * max(0.0, float(sim_map[p])) for p in focus_players]
-        node_colors = ["#0B1F3A" if p == selected_player else "#1264A3" for p in focus_players]
+        node_colors = ["#FDB927" if p == selected_player else "#B38AE8" for p in focus_players]
         network.add_trace(
             go.Scatter(
                 x=[pos[p][0] for p in focus_players],
@@ -1080,7 +1168,7 @@ def render_similar_players_tab() -> None:
             textposition="top center",
             marker=dict(
                 size=[22 if p == selected_player else 12 for p in focus_df["player"]],
-                color=["#0B1F3A" if p == selected_player else "#1264A3" for p in focus_df["player"]],
+                color=["#FDB927" if p == selected_player else "#B38AE8" for p in focus_df["player"]],
                 line=dict(color="white", width=1),
             ),
             hovertemplate="%{text}<extra></extra>",
@@ -1258,7 +1346,7 @@ def render_position_prediction_tab() -> None:
                 go.Bar(
                     x=prob_df["position"],
                     y=prob_df["probability"],
-                    marker_color="#1264A3",
+                    marker_color="#FDB927",
                     hovertemplate="%{x}: %{y:.3f}<extra></extra>",
                 )
             ]
@@ -1276,6 +1364,9 @@ def render_position_prediction_tab() -> None:
 
 st.title("NBA Historical Dashboards")
 st.caption("Five views: player performance, team evolution, era comparison, similar-player discovery, and position prediction.")
+st.markdown(
+    "Data source: [NBA/ABA/BAA Stats dataset on Kaggle (sumitrodatta)](https://www.kaggle.com/datasets/sumitrodatta/nba-aba-baa-stats)"
+)
 
 player_tab, team_tab, era_tab, similar_tab, pos_tab = st.tabs(
     [
