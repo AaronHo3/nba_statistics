@@ -7,6 +7,19 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+
+try:
+    from xgboost import XGBClassifier
+
+    HAS_XGBOOST = True
+except Exception:
+    HAS_XGBOOST = False
 
 st.set_page_config(page_title="NBA Historical Dashboards", layout="wide")
 
@@ -26,6 +39,7 @@ PLAYER_CANONICAL_COLUMNS = {
 }
 PLAYER_NUMERIC_COLUMNS = ["minutes", "points", "assists", "rebounds", "steals", "blocks"]
 REQUIRED_PLAYER_COLUMNS = {"season", "player", "team", "position", "minutes", "points", "assists"}
+POSITION_CLASSES = ["PG", "SG", "SF", "PF", "C"]
 
 
 
@@ -39,6 +53,36 @@ def _decade_from_year(year: int) -> str | None:
         return None
     decade_start = (year // 10) * 10
     return f"{decade_start}s"
+
+
+def _normalize_position(pos: str) -> str | None:
+    text = str(pos).strip().upper()
+    if not text:
+        return None
+    token = text
+    if "-" in token:
+        token = token.split("-")[0]
+    if "/" in token:
+        token = token.split("/")[0]
+    token = token.strip()
+    if token in POSITION_CLASSES:
+        return token
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def load_player_career_info(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    by_lower = {c.lower(): c for c in df.columns}
+    player_col = by_lower.get("player")
+    height_col = by_lower.get("ht_in_in")
+    if player_col is None or height_col is None:
+        return pd.DataFrame(columns=["player", "height"])
+    out = df[[player_col, height_col]].copy()
+    out.columns = ["player", "height"]
+    out["player"] = out["player"].astype(str)
+    out["height"] = pd.to_numeric(out["height"], errors="coerce")
+    return out.dropna(subset=["player"]).drop_duplicates(subset=["player"], keep="first")
 
 
 
@@ -1053,11 +1097,194 @@ def render_similar_players_tab() -> None:
         st.plotly_chart(embedding, use_container_width=True)
 
 
-st.title("NBA Historical Dashboards")
-st.caption("Four views: player performance, team evolution, era comparison, and similar-player discovery.")
+def render_position_prediction_tab() -> None:
+    st.subheader("Predict Player Position")
+    st.caption("Train a classifier on historical stats and predict PG / SG / SF / PF / C.")
 
-player_tab, team_tab, era_tab, similar_tab = st.tabs(
-    ["Player Performance Explorer", "Team Evolution Dashboard", "Era Comparison Dashboard", "Find Similar Players"]
+    csv_paths = load_csv_options(DATA_DIR)
+    if not csv_paths:
+        st.warning("No CSV files found in `data/raw`.")
+        return
+
+    schema_info = {p: inspect_player_csv(p) for p in csv_paths}
+    compatible_paths = [p for p in csv_paths if not schema_info[p][1]]
+    if not compatible_paths:
+        st.error("No compatible player CSV files found.")
+        return
+
+    default_idx = 0
+    for i, p in enumerate(compatible_paths):
+        if p.name == "Player Totals.csv":
+            default_idx = i
+            break
+
+    career_info_path = DATA_DIR / "Player Career Info.csv"
+    if not career_info_path.exists():
+        st.error("`Player Career Info.csv` is required for height feature.")
+        return
+
+    c1, c2, c3 = st.columns([3, 2, 2])
+    with c1:
+        selected_csv = st.selectbox(
+            "Player Data Source",
+            options=compatible_paths,
+            index=default_idx,
+            format_func=lambda p: p.name,
+            key="pos_pred_csv",
+        )
+    with c2:
+        seasons = sorted(load_player_data_from_csv(selected_csv)[0]["season"].dropna().unique(), key=_season_sort_key)
+        selected_seasons = st.multiselect(
+            "Seasons to include",
+            options=seasons,
+            default=seasons[-15:] if len(seasons) >= 15 else seasons,
+            key="pos_pred_seasons",
+        )
+    with c3:
+        min_minutes = st.slider("Min minutes", min_value=0, max_value=2000, value=300, step=50, key="pos_pred_min_mp")
+
+    model_choices = ["Logistic Regression", "Random Forest"] + (["XGBoost"] if HAS_XGBOOST else [])
+    selected_model = st.selectbox("Model", options=model_choices, key="pos_pred_model")
+
+    df, _ = load_player_data_from_csv(selected_csv)
+    career_df = load_player_career_info(career_info_path)
+
+    if selected_seasons:
+        df = df[df["season"].isin(selected_seasons)]
+    df = df[df["minutes"].fillna(0) >= min_minutes].copy()
+    df["position_clean"] = df["position"].map(_normalize_position)
+
+    model_df = df.merge(career_df, on="player", how="left")
+    feature_cols = ["height", "rebounds", "assists", "points", "blocks"]
+    model_df = model_df.dropna(subset=feature_cols + ["position_clean"]).copy()
+    model_df = model_df[model_df["position_clean"].isin(POSITION_CLASSES)]
+
+    if model_df.empty or model_df["position_clean"].nunique() < 2:
+        st.warning("Not enough labeled data after filters to train classifier.")
+        return
+
+    X = model_df[feature_cols].to_numpy(dtype=float)
+    y_text = model_df["position_clean"].to_numpy()
+    le = LabelEncoder()
+    y = le.fit_transform(y_text)
+
+    stratify = y if len(np.unique(y)) > 1 and np.min(np.bincount(y)) > 1 else None
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=stratify
+    )
+
+    if selected_model == "Logistic Regression":
+        model = Pipeline(
+            steps=[
+                ("scaler", StandardScaler()),
+                ("clf", LogisticRegression(max_iter=2000)),
+            ]
+        )
+    elif selected_model == "Random Forest":
+        model = RandomForestClassifier(
+            n_estimators=400,
+            random_state=42,
+            class_weight="balanced_subsample",
+            min_samples_leaf=2,
+        )
+    else:
+        model = XGBClassifier(
+            objective="multi:softprob",
+            num_class=len(le.classes_),
+            eval_metric="mlogloss",
+            n_estimators=300,
+            max_depth=5,
+            learning_rate=0.05,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            random_state=42,
+        )
+
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred, average="macro")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Training rows", f"{len(X_train):,}")
+    m2.metric("Test Accuracy", f"{acc:.3f}")
+    m3.metric("Macro F1", f"{f1:.3f}")
+
+    st.markdown("### Predict Position From Features")
+    reference_players = sorted(model_df["player"].unique())
+    reference = st.selectbox("Reference player (auto-fill)", options=reference_players, key="pos_pred_reference")
+    ref_row = model_df[model_df["player"] == reference].iloc[0]
+
+    def _bounds(col: str, floor: float = 0.0, pad: float = 0.1) -> tuple[float, float]:
+        lo = float(pd.to_numeric(model_df[col], errors="coerce").min())
+        hi = float(pd.to_numeric(model_df[col], errors="coerce").max())
+        if not np.isfinite(lo):
+            lo = floor
+        if not np.isfinite(hi):
+            hi = floor + 1.0
+        lo = min(lo, floor)
+        hi = max(hi, lo + 1.0)
+        return lo, hi * (1.0 + pad)
+
+    h_lo, h_hi = _bounds("height", floor=60.0, pad=0.05)
+    r_lo, r_hi = _bounds("rebounds", floor=0.0, pad=0.10)
+    a_lo, a_hi = _bounds("assists", floor=0.0, pad=0.10)
+    p_lo, p_hi = _bounds("points", floor=0.0, pad=0.10)
+    b_lo, b_hi = _bounds("blocks", floor=0.0, pad=0.10)
+
+    i1, i2, i3, i4, i5 = st.columns(5)
+    with i1:
+        height_val = st.number_input("Height (in)", min_value=h_lo, max_value=h_hi, value=float(ref_row["height"]), step=1.0)
+    with i2:
+        rebounds_val = st.number_input("Rebounds", min_value=r_lo, max_value=r_hi, value=float(ref_row["rebounds"]), step=0.1)
+    with i3:
+        assists_val = st.number_input("Assists", min_value=a_lo, max_value=a_hi, value=float(ref_row["assists"]), step=0.1)
+    with i4:
+        points_val = st.number_input("Points", min_value=p_lo, max_value=p_hi, value=float(ref_row["points"]), step=0.1)
+    with i5:
+        blocks_val = st.number_input("Blocks", min_value=b_lo, max_value=b_hi, value=float(ref_row["blocks"]), step=0.1)
+
+    input_row = np.array([[height_val, rebounds_val, assists_val, points_val, blocks_val]], dtype=float)
+    pred_class = int(model.predict(input_row)[0])
+    predicted_position = le.inverse_transform([pred_class])[0]
+    st.success(f"Predicted position: {predicted_position}")
+
+    if hasattr(model, "predict_proba"):
+        probs = model.predict_proba(input_row)[0]
+        labels = le.inverse_transform(np.arange(len(probs)))
+        prob_df = pd.DataFrame({"position": labels, "probability": probs}).sort_values("probability", ascending=False)
+        prob_fig = go.Figure(
+            data=[
+                go.Bar(
+                    x=prob_df["position"],
+                    y=prob_df["probability"],
+                    marker_color="#1264A3",
+                    hovertemplate="%{x}: %{y:.3f}<extra></extra>",
+                )
+            ]
+        )
+        prob_fig.update_layout(
+            template="plotly_white",
+            height=360,
+            yaxis=dict(range=[0, 1], tickformat=".0%"),
+            xaxis_title="Position",
+            yaxis_title="Prediction Probability",
+            margin=dict(l=20, r=20, t=30, b=20),
+        )
+        st.plotly_chart(prob_fig, use_container_width=True)
+
+
+st.title("NBA Historical Dashboards")
+st.caption("Five views: player performance, team evolution, era comparison, similar-player discovery, and position prediction.")
+
+player_tab, team_tab, era_tab, similar_tab, pos_tab = st.tabs(
+    [
+        "Player Performance Explorer",
+        "Team Evolution Dashboard",
+        "Era Comparison Dashboard",
+        "Find Similar Players",
+        "Predict Player Position",
+    ]
 )
 with player_tab:
     render_player_tab()
@@ -1067,3 +1294,5 @@ with era_tab:
     render_era_tab()
 with similar_tab:
     render_similar_players_tab()
+with pos_tab:
+    render_position_prediction_tab()

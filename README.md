@@ -1,10 +1,11 @@
 # NBA Historical Dashboards
 
-Interactive Streamlit app with four dashboards:
+Interactive Streamlit app with five dashboards:
 - Player Performance Explorer
 - Team Evolution Dashboard
 - Era Comparison Dashboard
 - Find Similar Players
+- Predict Player Position
 
 ## Quick Start (Make)
 
@@ -89,6 +90,10 @@ make clean         # remove local caches
 - Per-stat contribution breakdown (`delta` + contribution %)
 - Similarity network graph
 - 2D scatter embedding of player profiles
+- Position prediction tab
+- Models: Logistic Regression, Random Forest, XGBoost
+- Features: height, rebounds, assists, points, blocks
+- Output: PG / SG / SF / PF / C + prediction probabilities
 
 ## Notes
 
